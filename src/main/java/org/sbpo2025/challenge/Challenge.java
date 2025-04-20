@@ -1,12 +1,21 @@
 package org.sbpo2025.challenge;
 
+import org.sbpo2025.challenge.model.*;
+import org.sbpo2025.challenge.solution.ChallengeSolution;
+import org.sbpo2025.challenge.SimulatedAnnealing.AdaptiveSimulatedAnnealing;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+
 import org.apache.commons.lang3.time.StopWatch;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileReader;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -76,8 +85,8 @@ public class Challenge {
         }
         try {
             BufferedWriter writer = new BufferedWriter(new FileWriter(outputFilePath));
-            var orders = challengeSolution.orders();
-            var aisles = challengeSolution.aisles();
+            var orders = challengeSolution.getOrders();
+            var aisles = challengeSolution.getAisles();
 
             // Write the number of orders
             writer.write(String.valueOf(orders.size()));
