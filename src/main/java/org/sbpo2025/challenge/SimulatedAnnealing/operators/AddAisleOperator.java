@@ -30,9 +30,10 @@ public class AddAisleOperator extends BaseOperator<ChallengeSolution> {
             .filter(id -> !currentAisles.contains(id))
             .collect(Collectors.toList());
 
-        // Se não há corredores disponíveis, retorna falha
+        // Se não há corredores disponíveis, retorna NaN para indicar falha na aplicação
         if (availableAisles.isEmpty()) {
-            return 0;
+            // Retorna NaN para indicar que o operador não foi aplicado
+            return Double.NaN;
         }
 
         // Seleciona aleatoriamente um corredor para adicionar
