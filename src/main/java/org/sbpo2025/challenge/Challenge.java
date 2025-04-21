@@ -2,7 +2,7 @@ package org.sbpo2025.challenge;
 
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
-import org.sbpo2025.challenge.SimulatedAnnealing.AdaptiveSimulatedAnnealing;
+import org.sbpo2025.challenge.SimulatedAnnealing.IntensificationWrapper; // Corrigido para usar o novo nome
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;

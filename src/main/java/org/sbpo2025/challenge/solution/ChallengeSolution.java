@@ -261,6 +261,16 @@ public class ChallengeSolution {
         return evaluator.calculateSwapOrdersDelta(orderId1, orderId2);
     }
 
+    /**
+     * Calcula incrementalmente o impacto de trocar um corredor por outro.
+     * @param aisleToRemove ID do corredor a ser removido
+     * @param aisleToAdd ID do corredor a ser adicionado
+     * @return O delta de custo da troca
+     */
+    public double calculateSwapAisleDelta(int aisleToRemove, int aisleToAdd) {
+        return evaluator.calculateSwapAisleDelta(aisleToRemove, aisleToAdd);
+    }
+
     // --- Métodos delegados para SolutionMover ---
 
     public boolean perturb(int dimensionIndex, double delta) {

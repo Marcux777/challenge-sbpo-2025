@@ -365,6 +365,175 @@ public class IncrementalEvaluator {
     }
 
     /**
+     * Calcula incrementalmente o impacto de trocar um corredor por outro.
+     * Combina os deltas de remoção e adição, ajustando para o estado intermediário.
+     *
+     * @param aisleToRemove ID do corredor a ser removido
+     * @param aisleToAdd ID do corredor a ser adicionado
+     * @return O delta de custo da troca
+     */
+    public double calculateSwapAisleDelta(int aisleToRemove, int aisleToAdd) {
+        Set<Integer> orders = solution.getOrders();
+        Set<Integer> aisles = solution.getAisles();
+        Map<Integer, Map<Integer, Integer>> coverage = solution.getCoverage();
+        Map<Integer, Set<Integer>> aisleToOrders = solution.getAisleToOrders();
+        ChallengeInstance instance = solution.getInstance();
+
+        // Verifica se a troca é válida (não remover/adicionar o mesmo, ou corredores já presentes/ausentes)
+        if (aisleToRemove == aisleToAdd || !aisles.contains(aisleToRemove) || aisles.contains(aisleToAdd)) {
+            return 0.0; // Troca inválida ou sem efeito
+        }
+
+        // --- Cálculo do Delta de Remoção (similar a calculateRemoveAisleDelta) ---
+        double deltaRemove = 0.0;
+        int oldTotalAisles = aisles.size();
+        int intermediateTotalAisles = oldTotalAisles - 1;
+        int totalOrders = orders.size();
+
+        // 1. Custo do corredor removido
+        deltaRemove -= 10;
+
+        // 2. Atualiza custo de razão corredores/pedidos (estado intermediário)
+        if (totalOrders > 0) {
+            double oldRatioCost = (double) oldTotalAisles / totalOrders;
+            double intermediateRatioCost = (double) intermediateTotalAisles / totalOrders;
+            deltaRemove += (intermediateRatioCost - oldRatioCost) * 50;
+        }
+
+        // 3. Verifica quais pedidos podem ficar sem cobertura após a remoção
+        Set<Integer> ordersAffectedByRemoval = new HashSet<>();
+        if (aisleToOrders.containsKey(aisleToRemove)) {
+            ordersAffectedByRemoval.addAll(aisleToOrders.get(aisleToRemove));
+            ordersAffectedByRemoval.retainAll(orders);
+        }
+
+        Corredor corredorToRemove = instance.getCorredores().stream()
+            .filter(c -> c.getId() == aisleToRemove)
+            .findFirst().orElse(null);
+
+        Map<Integer, Boolean> wasPenalizedBeforeRemoval = new HashMap<>();
+        Map<Integer, Boolean> willBePenalizedAfterRemoval = new HashMap<>();
+
+        if (corredorToRemove != null) {
+            for (Integer orderId : ordersAffectedByRemoval) {
+                // Status antes da remoção
+                boolean currentlyPenalized = false;
+                if (coverage.containsKey(orderId)) {
+                    for (Map.Entry<Integer, Integer> itemEntry : coverage.get(orderId).entrySet()) {
+                        if (itemEntry.getValue() <= 0) {
+                            currentlyPenalized = true;
+                            break;
+                        }
+                    }
+                }
+                wasPenalizedBeforeRemoval.put(orderId, currentlyPenalized);
+
+                // Simula remoção
+                Map<Integer, Integer> simulatedCoverage = new HashMap<>();
+                if (coverage.containsKey(orderId)) {
+                    for (Map.Entry<Integer, Integer> entry : coverage.get(orderId).entrySet()) {
+                        simulatedCoverage.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                for (ItemStock stock : corredorToRemove.getEstoque()) {
+                    int itemId = stock.getItemId();
+                    if (simulatedCoverage.containsKey(itemId)) {
+                        simulatedCoverage.put(itemId, simulatedCoverage.get(itemId) - 1);
+                    }
+                }
+
+                // Status após remoção
+                boolean penalizedAfterRemoval = false;
+                for (Map.Entry<Integer, Integer> entry : simulatedCoverage.entrySet()) {
+                    if (entry.getValue() <= 0) {
+                        penalizedAfterRemoval = true;
+                        break;
+                    }
+                }
+                willBePenalizedAfterRemoval.put(orderId, penalizedAfterRemoval);
+
+                // Adiciona penalidade se necessário
+                if (!currentlyPenalized && penalizedAfterRemoval) {
+                    deltaRemove += 1000;
+                }
+            }
+        }
+
+        // --- Cálculo do Delta de Adição (considerando o estado após a remoção) ---
+        double deltaAdd = 0.0;
+        int finalTotalAisles = intermediateTotalAisles + 1; // Volta ao número original de corredores
+
+        // 1. Custo do corredor adicionado
+        deltaAdd += 10;
+
+        // 2. Atualiza custo de razão (do estado intermediário para o final)
+        if (totalOrders > 0) {
+            double intermediateRatioCost = (double) intermediateTotalAisles / totalOrders;
+            double finalRatioCost = (double) finalTotalAisles / totalOrders;
+            deltaAdd += (finalRatioCost - intermediateRatioCost) * 50;
+        }
+
+        // 3. Verifica quais pedidos podem ser cobertos pelo novo corredor
+        Set<Integer> ordersAffectedByAddition = new HashSet<>();
+        if (aisleToOrders.containsKey(aisleToAdd)) {
+            ordersAffectedByAddition.addAll(aisleToOrders.get(aisleToAdd));
+            ordersAffectedByAddition.retainAll(orders);
+        }
+
+        Corredor corredorToAdd = instance.getCorredores().stream()
+            .filter(c -> c.getId() == aisleToAdd)
+            .findFirst().orElse(null);
+
+        if (corredorToAdd != null) {
+            for (Integer orderId : ordersAffectedByAddition) {
+                // Status após a remoção (calculado anteriormente)
+                boolean penalizedAfterRemoval = willBePenalizedAfterRemoval.getOrDefault(orderId, false);
+
+                // Simula adição sobre o estado pós-remoção
+                Map<Integer, Integer> simulatedCoverageAfterRemoval = new HashMap<>();
+                 if (coverage.containsKey(orderId)) {
+                    for (Map.Entry<Integer, Integer> entry : coverage.get(orderId).entrySet()) {
+                        simulatedCoverageAfterRemoval.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                // Aplica efeito da remoção (se o pedido foi afetado)
+                if (corredorToRemove != null && ordersAffectedByRemoval.contains(orderId)) {
+                     for (ItemStock stock : corredorToRemove.getEstoque()) {
+                        int itemId = stock.getItemId();
+                        if (simulatedCoverageAfterRemoval.containsKey(itemId)) {
+                            simulatedCoverageAfterRemoval.put(itemId, simulatedCoverageAfterRemoval.get(itemId) - 1);
+                        }
+                    }
+                }
+                // Aplica efeito da adição
+                for (ItemStock stock : corredorToAdd.getEstoque()) {
+                    int itemId = stock.getItemId();
+                    if (simulatedCoverageAfterRemoval.containsKey(itemId)) {
+                        simulatedCoverageAfterRemoval.put(itemId, simulatedCoverageAfterRemoval.get(itemId) + 1);
+                    }
+                }
+
+                // Status final após adição
+                boolean penalizedAfterAddition = false;
+                for (Map.Entry<Integer, Integer> entry : simulatedCoverageAfterRemoval.entrySet()) {
+                    if (entry.getValue() <= 0) {
+                        penalizedAfterAddition = true;
+                        break;
+                    }
+                }
+
+                // Remove penalidade se o pedido estava penalizado após a remoção e agora não está mais
+                if (penalizedAfterRemoval && !penalizedAfterAddition) {
+                    deltaAdd -= 1000;
+                }
+            }
+        }
+
+        // Delta total é a soma dos deltas
+        return deltaRemove + deltaAdd;
+    }
+
+    /**
      * Calcula incrementalmente o custo de trocar dois pedidos.
      */
     public double calculateSwapOrdersDelta(int orderId1, int orderId2) {
