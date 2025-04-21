@@ -20,6 +20,10 @@ public abstract class BaseOperator<S> implements Operator<S> {
     // Parâmetros de decaimento do score (para dar mais peso a resultados recentes)
     private double decayFactor = 0.95;
 
+    // Acúmulo de recompensas e contagem de aplicações
+    private double sumRewards = 0.0;
+    private int countApplications = 0;
+
     // Gerador de números aleatórios
     protected final Random random;
 
@@ -37,7 +41,11 @@ public abstract class BaseOperator<S> implements Operator<S> {
 
     @Override
     public void credit(double reward) {
-        // Aplica decaimento ao score anterior e adiciona a nova recompensa
+        // Acumula recompensa e contagem
+        sumRewards += reward;
+        countApplications++;
+        // O operador pode implementar lógica própria de score (ex: média móvel, decaimento, etc.)
+        // Por padrão, mantemos o score legado para compatibilidade
         score = score * decayFactor + reward;
     }
 
@@ -71,5 +79,20 @@ public abstract class BaseOperator<S> implements Operator<S> {
             throw new IllegalArgumentException("Fator de decaimento deve estar entre 0 e 1");
         }
         this.decayFactor = factor;
+    }
+
+    @Override
+    public double getSumRewards() {
+        return sumRewards;
+    }
+
+    @Override
+    public int getCountApplications() {
+        return countApplications;
+    }
+
+    @Override
+    public double getMeanReward() {
+        return countApplications > 0 ? sumRewards / countApplications : 0.0;
     }
 }

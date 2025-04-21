@@ -49,12 +49,14 @@ public class SwapOrderOperator extends BaseOperator<ChallengeSolution> {
         double initialCost = solution.cost();
 
         // Realiza a troca: primeiro remove, depois adiciona
-        solution.applyRemoveOrder(orderToRemove); // Correção: usar o método correto para remover pedido
+        solution.applyRemoveOrder(orderToRemove);
         solution.applyAddOrder(orderToAdd);
 
-        // Repara a solução se necessário
+        // Se a solução não for viável após a troca, desfaz a operação
         if (!solution.isViable()) {
-            solution.repair();
+            solution.applyRemoveOrder(orderToAdd); // remove o que foi adicionado
+            solution.applyAddOrder(orderToRemove); // readiciona o que foi removido
+            return 0; // não houve alteração efetiva
         }
 
         // Retorna o delta global

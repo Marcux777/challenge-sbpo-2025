@@ -3,9 +3,14 @@ package org.sbpo2025.challenge.SimulatedAnnealing;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.sbpo2025.challenge.SimulatedAnnealing.operators.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
+import org.sbpo2025.challenge.SimulatedAnnealing.SelectionStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.Ucb1Strategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.EpsilonGreedyStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.RouletteWheelStrategy;
 
 /**
  * Implementação da Dinâmica Avançada de Operadores para ASA.
@@ -19,7 +24,7 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
     private OperatorSelector<ChallengeSolution> selector;
 
     // Lista de operadores disponíveis
-    private List<Operator<ChallengeSolution>> operators;
+    private CopyOnWriteArrayList<Operator<ChallengeSolution>> operators;
 
     // Gerador de números aleatórios
     private Random random;
@@ -33,7 +38,7 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
      */
     public AdaptiveOperatorSelector() {
         this.random = new Random();
-        this.operators = new ArrayList<>();
+        this.operators = new CopyOnWriteArrayList<>();
 
         // Inicializa os operadores básicos
         initializeOperators();
@@ -42,7 +47,9 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
         this.selector = new OperatorSelector<>(operators);
 
         // Configura a estratégia de seleção e fatores de exploração
-        selector.setStrategy(OperatorSelector.SelectionStrategy.UCB1);
+        // Substituir enum antigo por uso de classes de estratégia
+        // Exemplo de uso:
+        // selector.setStrategy(new Ucb1Strategy<>(Math.sqrt(2.0)));
         selector.setUcbExplorationFactor(Math.sqrt(2.0)); // Valor padrão para UCB1
         selector.setEpsilonExplorationFactor(0.1); // Valor padrão para Epsilon-Greedy
     }
@@ -141,7 +148,7 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
      *
      * @param strategy Estratégia de seleção
      */
-    public void setSelectionStrategy(OperatorSelector.SelectionStrategy strategy) {
+    public void setSelectionStrategy(SelectionStrategy strategy) {
         this.selector.setStrategy(strategy);
     }
 

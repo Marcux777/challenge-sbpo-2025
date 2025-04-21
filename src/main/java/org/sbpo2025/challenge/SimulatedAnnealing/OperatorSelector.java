@@ -1,11 +1,14 @@
 package org.sbpo2025.challenge.SimulatedAnnealing;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Random;
-import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.DoubleAdder;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Implementação do mecanismo de seleção adaptativa de operadores (AOS).
@@ -16,30 +19,44 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class OperatorSelector<S> {
 
-    // Lista de operadores disponíveis
-    private List<Operator<S>> operators;
+    // Lista de operadores disponíveis (imutável após construção)
+    private final List<Operator<S>> operators;
 
-    // Gerador de números aleatórios
-    private Random random;
+    // Gerador de números aleatórios (não mais usado diretamente)
+    private final Random random;
 
-    // Estatísticas (Thread-Safe)
-    private ConcurrentMap<Operator<S>, AtomicInteger> usageCounts;
-    private ConcurrentMap<Operator<S>, AtomicInteger> successCounts;
-    private ConcurrentMap<Operator<S>, Double> totalRewards; // Double is generally safe enough for concurrent updates if only added to
+    // Estatísticas por índice (Thread-Safe)
+    private final AtomicInteger[] usageCounts;
+    private final AtomicInteger[] successCounts;
+    private final DoubleAdder[] totalRewards;
+
+    // Mapeamento de operadores para índices
+    private final Map<Operator<S>, Integer> indexMap;
 
     // Parâmetros de configuração
     private double ucbExplorationFactor = Math.sqrt(2.0); // Fator para UCB1 (default sqrt(2))
     private double epsilonExplorationFactor = 0.1; // Fator para ε-greedy (default 0.1)
-    private AtomicInteger totalApplications = new AtomicInteger(0); // Total de aplicações (Thread-Safe)
+    private final LongAdder totalApplications = new LongAdder(); // Total de aplicações (Thread-Safe)
+    private final ReentrantReadWriteLock weightsLock = new ReentrantReadWriteLock();
 
     // Estratégia de seleção
-    public enum SelectionStrategy {
-        ROULETTE_WHEEL,   // Roleta (proporcional ao score)
-        UCB1,             // Upper Confidence Bound
-        EPSILON_GREEDY    // ε-greedy (seleciona o melhor com probabilidade 1-ε)
-    }
+    private SelectionStrategy<S> strategyImpl;
+    private Stats stats;
 
-    private SelectionStrategy strategy = SelectionStrategy.UCB1;
+    // Classe de estatísticas para passar para as estratégias
+    public class Stats {
+        public final AtomicInteger[] usageCounts;
+        public final AtomicInteger[] successCounts;
+        public final DoubleAdder[] totalRewards;
+        public final LongAdder totalApplications;
+
+        public Stats(AtomicInteger[] usageCounts, AtomicInteger[] successCounts, DoubleAdder[] totalRewards, LongAdder totalApplications) {
+            this.usageCounts = usageCounts;
+            this.successCounts = successCounts;
+            this.totalRewards = totalRewards;
+            this.totalApplications = totalApplications;
+        }
+    }
 
     /**
      * Construtor com lista de operadores e semente aleatória padrão.
@@ -47,7 +64,7 @@ public class OperatorSelector<S> {
      * @param operators Lista de operadores disponíveis
      */
     public OperatorSelector(List<Operator<S>> operators) {
-        this(operators, new Random()); // Chama o construtor com Random padrão
+        this(operators, new Random());
     }
 
     /**
@@ -57,22 +74,23 @@ public class OperatorSelector<S> {
      * @param random Instância de Random para reprodutibilidade
      */
     public OperatorSelector(List<Operator<S>> operators, Random random) {
-        this.operators = new ArrayList<>(operators);
-        this.random = random;
-
-        // Inicializa estatísticas (Thread-Safe)
-        this.usageCounts = new ConcurrentHashMap<>();
-        this.successCounts = new ConcurrentHashMap<>();
-        this.totalRewards = new ConcurrentHashMap<>();
-
-        // Inicializa contadores para cada operador
-        for (Operator<S> op : operators) {
-            usageCounts.put(op, new AtomicInteger(0));
-            successCounts.put(op, new AtomicInteger(0));
-            totalRewards.put(op, 0.0);
-            // Inicialmente todos operadores têm probabilidade igual
-            op.setSelectionProbability(1.0 / operators.size());
+        if (operators == null || operators.isEmpty())
+            throw new IllegalArgumentException("Deve haver ao menos um operador");
+        this.operators = List.copyOf(operators); // Imutável
+        this.random = random; // Mantido para compatibilidade, mas não usado
+        int n = operators.size();
+        this.usageCounts = new AtomicInteger[n];
+        this.successCounts = new AtomicInteger[n];
+        this.totalRewards = new DoubleAdder[n];
+        this.indexMap = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            usageCounts[i] = new AtomicInteger(0);
+            successCounts[i] = new AtomicInteger(0);
+            totalRewards[i] = new DoubleAdder();
+            this.indexMap.put(this.operators.get(i), i);
+            operators.get(i).setSelectionProbability(1.0 / n);
         }
+        this.stats = new Stats(usageCounts, successCounts, totalRewards, totalApplications);
     }
 
     /**
@@ -81,107 +99,7 @@ public class OperatorSelector<S> {
      * @return O operador selecionado
      */
     public Operator<S> select() {
-        switch (strategy) {
-            case ROULETTE_WHEEL:
-                return selectRouletteWheel();
-            case UCB1:
-                return selectUCB();
-            case EPSILON_GREEDY:
-                return selectEpsilonGreedy();
-            default:
-                // Fallback para Roleta se estratégia for inválida
-                System.err.println("WARN: Estratégia de seleção inválida, usando Roleta.");
-                return selectRouletteWheel();
-        }
-    }
-
-    /**
-     * Implementação da seleção por roleta (proporcional ao score).
-     */
-    private Operator<S> selectRouletteWheel() {
-        // Garante que os scores sejam não-negativos para a roleta
-        double minScore = operators.stream().mapToDouble(Operator::getScore).min().orElse(0.0);
-        double offset = minScore < 0 ? -minScore : 0; // Desloca scores para serem >= 0
-
-        double sum = operators.stream().mapToDouble(op -> op.getScore() + offset).sum();
-
-        // Se a soma for zero (ou negativa por erro numérico), seleciona uniformemente
-        if (sum <= 1e-9) {
-            return operators.get(random.nextInt(operators.size()));
-        }
-
-        double r = random.nextDouble() * sum;
-        double acc = 0;
-
-        for (Operator<S> op : operators) {
-            acc += (op.getScore() + offset);
-            if (r <= acc) {
-                return op;
-            }
-        }
-
-        // Fallback para caso de erro numérico extremo
-        return operators.get(random.nextInt(operators.size()));
-    }
-
-    /**
-     * Implementação da seleção UCB1 (Upper Confidence Bound).
-     */
-    private Operator<S> selectUCB() {
-        Operator<S> selected = null;
-        double maxUcb = Double.NEGATIVE_INFINITY;
-        // Evita log(0) ou log(1) - começa a contar a partir da segunda aplicação total
-        double logTotalApplications = Math.log(Math.max(2, totalApplications.get()));
-
-        // Primeiro, garante que cada operador seja usado pelo menos uma vez
-        for (Operator<S> op : operators) {
-            if (usageCounts.get(op).get() == 0) {
-                return op; // Sempre experimenta operadores não utilizados primeiro
-            }
-        }
-
-        // Se todos já foram usados, calcula UCB1
-        for (Operator<S> op : operators) {
-            int usages = usageCounts.get(op).get();
-            // Calcula a recompensa média (exploitation term)
-            // Usamos o score atual do operador que reflete a recompensa acumulada normalizada
-            double exploitation = op.getScore();
-            // Calcula o termo de exploração
-            double exploration = ucbExplorationFactor * Math.sqrt(logTotalApplications / usages);
-            double ucbValue = exploitation + exploration;
-
-            if (ucbValue > maxUcb) {
-                maxUcb = ucbValue;
-                selected = op;
-            }
-        }
-
-        // Fallback caso algo dê errado (ex: todos UCBs são -Infinito)
-        return selected != null ? selected : operators.get(random.nextInt(operators.size()));
-    }
-
-    /**
-     * Implementação da seleção ε-greedy.
-     */
-    private Operator<S> selectEpsilonGreedy() {
-        // Com probabilidade epsilon, escolhe aleatoriamente (exploração)
-        if (random.nextDouble() < epsilonExplorationFactor) {
-            return operators.get(random.nextInt(operators.size()));
-        }
-
-        // Caso contrário, escolhe o melhor operador (exploitação)
-        Operator<S> best = null;
-        double maxScore = Double.NEGATIVE_INFINITY;
-
-        for (Operator<S> op : operators) {
-            if (op.getScore() > maxScore) {
-                maxScore = op.getScore();
-                best = op;
-            }
-        }
-
-        // Fallback se nenhum operador tiver score > -Infinito
-        return best != null ? best : operators.get(random.nextInt(operators.size()));
+        return strategyImpl.select(operators, stats);
     }
 
     /**
@@ -192,60 +110,41 @@ public class OperatorSelector<S> {
      * @param accepted Se a solução foi aceita (p.ex., no Simulated Annealing)
      */
     public void feedback(Operator<S> operator, double delta, boolean accepted) {
-        totalApplications.incrementAndGet();
-
-        // Atualiza contadores
-        usageCounts.get(operator).incrementAndGet();
-
-        // Atribui crédito se houve melhoria ou a solução foi aceita
+        Integer idx = indexMap.get(operator);
+        if (idx == null) return;
+        totalApplications.increment();
+        usageCounts[idx].incrementAndGet();
         if (delta < 0 || accepted) {
-            successCounts.get(operator).incrementAndGet();
-
-            // Recompensa simples: 1 para melhoria, 0.1 para aceitação de piora, 0 senão
+            successCounts[idx].incrementAndGet();
             double reward = (delta < 0) ? 1.0 : (accepted ? 0.1 : 0.0);
-
-            // Atualiza a recompensa total (de forma aditiva, geralmente seguro)
-            totalRewards.compute(operator, (k, v) -> (v == null ? 0 : v) + reward);
-
-            // Atualiza o score do operador chamando o método credit()
-            // Este método já existe na interface Operator e é implementado em BaseOperator
+            totalRewards[idx].add(reward);
             operator.credit(reward);
-
-            // Remove a tentativa de definir o score diretamente, pois o método não existe na interface
-            // double newScore = totalRewards.get(operator) / usageCounts.get(operator).get();
-            // operator.setScore(newScore); // ERRO: Método indefinido para Operator<S>
-        } else {
-            // Opcional: Aplicar decaimento mesmo em falhas (passando recompensa 0)?
-            // operator.credit(0.0);
         }
-        // Nota: A atualização de pesos (probabilidades para Roleta) é feita separadamente
-        // em updateWeights(), geralmente chamada periodicamente.
     }
 
     /**
      * Atualiza as probabilidades de seleção de todos os operadores (para Roleta).
      */
     public void updateWeights() {
-        // Garante que os scores sejam não-negativos para a roleta
-        double minScore = operators.stream().mapToDouble(Operator::getScore).min().orElse(0.0);
-        double offset = minScore < 0 ? -minScore : 0; // Desloca scores para serem >= 0
-
-        double total = operators.stream().mapToDouble(op -> op.getScore() + offset).sum();
-
-        // Caso todos os scores (ajustados) sejam zero, distribui igualmente
-        if (total <= 1e-9) {
-            double equalProb = 1.0 / operators.size();
-            for (Operator<S> op : operators) {
-                op.setSelectionProbability(equalProb);
+        weightsLock.writeLock().lock();
+        try {
+            double minScore = operators.stream().mapToDouble(Operator::getMeanReward).min().orElse(0.0);
+            double offset = minScore < 0 ? -minScore : 0;
+            double total = operators.stream().mapToDouble(op -> op.getMeanReward() + offset).sum();
+            if (total <= 1e-9) {
+                double equalProb = 1.0 / operators.size();
+                for (Operator<S> op : operators) {
+                    op.setSelectionProbability(equalProb);
+                }
+                return;
             }
-            return;
-        }
-
-        // Atualiza as probabilidades proporcionalmente aos scores ajustados
-        for (Operator<S> op : operators) {
-            double adjustedScore = op.getScore() + offset;
-            double newP = adjustedScore / total;
-            op.setSelectionProbability(newP);
+            for (Operator<S> op : operators) {
+                double adjustedScore = op.getMeanReward() + offset;
+                double newP = adjustedScore / total;
+                op.setSelectionProbability(newP);
+            }
+        } finally {
+            weightsLock.writeLock().unlock();
         }
     }
 
@@ -253,25 +152,30 @@ public class OperatorSelector<S> {
      * Exibe estatísticas sobre o uso dos operadores.
      */
     public void printStatistics() {
-        System.out.println("\n=== Estatísticas de Operadores (Total Aplicações: " + totalApplications.get() + ") ===");
-        System.out.printf("%-10s | %5s | %7s | %5s | %10s | %7s%n",
-                          "Operador", "Uso", "Sucesso", "Taxa", "Recompensa", "Score");
-        System.out.println("----------------------------------------------------------------");
-
-        // Ordena por score para melhor visualização
-        operators.stream()
-            .sorted((o1, o2) -> Double.compare(o2.getScore(), o1.getScore())) // Decrescente
-            .forEach(op -> {
-                int uses = usageCounts.get(op).get();
-                int successes = successCounts.get(op).get();
-                double rate = uses > 0 ? (double) successes / uses : 0;
-                double reward = totalRewards.getOrDefault(op, 0.0);
-                double score = op.getScore(); // Score atual usado pela seleção
-
-                System.out.printf("%-10s | %5d | %7d | %5.2f | %10.2f | %7.4f%n",
-                        op.getName(), uses, successes, rate, reward, score);
-            });
-        System.out.println("----------------------------------------------------------------");
+        weightsLock.readLock().lock();
+        try {
+            System.out.println("\n=== Estatísticas de Operadores (Total Aplicações: " + totalApplications.sum() + ") ===");
+            System.out.printf("%-10s | %5s | %7s | %5s | %10s | %7s | %7s | %7s%n",
+                              "Operador", "Uso", "Sucesso", "Taxa", "Recompensa", "Score", "Média", "N Aplic");
+            System.out.println("-------------------------------------------------------------------------------");
+            operators.stream()
+                .sorted((o1, o2) -> Double.compare(o2.getMeanReward(), o1.getMeanReward()))
+                .forEach(op -> {
+                    Integer idx = indexMap.get(op);
+                    int uses = usageCounts[idx].get();
+                    int successes = successCounts[idx].get();
+                    double rate = uses > 0 ? (double) successes / uses : 0;
+                    double reward = totalRewards[idx].sum();
+                    double score = op.getScore();
+                    double mean = op.getMeanReward();
+                    int nApp = op.getCountApplications();
+                    System.out.printf("%-10s | %5d | %7d | %5.2f | %10.2f | %7.4f | %7.4f | %7d%n",
+                            op.getName(), uses, successes, rate, reward, score, mean, nApp);
+                });
+            System.out.println("-------------------------------------------------------------------------------");
+        } finally {
+            weightsLock.readLock().unlock();
+        }
     }
 
     /**
@@ -280,8 +184,8 @@ public class OperatorSelector<S> {
      * @param strategy A estratégia a ser usada
      */
     public void setStrategy(SelectionStrategy strategy) {
-        this.strategy = strategy;
-        System.out.println("INFO: Estratégia de seleção alterada para " + strategy);
+        this.strategyImpl = strategy;
+        System.out.println("INFO: Estratégia de seleção alterada para " + strategy.getClass().getSimpleName());
     }
 
     /**
@@ -292,6 +196,9 @@ public class OperatorSelector<S> {
     public void setUcbExplorationFactor(double factor) {
         if (factor < 0) throw new IllegalArgumentException("Fator de exploração UCB deve ser não-negativo.");
         this.ucbExplorationFactor = factor;
+        if (strategyImpl instanceof Ucb1Strategy) {
+            this.strategyImpl = new Ucb1Strategy<>(factor);
+        }
     }
 
     /**
@@ -302,6 +209,9 @@ public class OperatorSelector<S> {
     public void setEpsilonExplorationFactor(double factor) {
         if (factor < 0 || factor > 1) throw new IllegalArgumentException("Fator de exploração Epsilon deve estar entre 0.0 e 1.0.");
         this.epsilonExplorationFactor = factor;
+        if (strategyImpl instanceof EpsilonGreedyStrategy) {
+            this.strategyImpl = new EpsilonGreedyStrategy<>(factor);
+        }
     }
 
     // Getters para os fatores, se necessário

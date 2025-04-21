@@ -51,4 +51,19 @@ public interface Operator<S> {
      * @return Nome do operador
      */
     String getName();
+
+    /**
+     * Retorna a soma acumulada das recompensas recebidas.
+     */
+    double getSumRewards();
+
+    /**
+     * Retorna o número de aplicações (feedbacks recebidos).
+     */
+    int getCountApplications();
+
+    /**
+     * Retorna a recompensa média acumulada (score normalizado para seleção).
+     */
+    double getMeanReward();
 }

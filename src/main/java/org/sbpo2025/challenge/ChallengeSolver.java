@@ -11,6 +11,10 @@ import org.sbpo2025.challenge.SimulatedAnnealing.AdaptiveOperatorSelector;
 import org.sbpo2025.challenge.SimulatedAnnealing.IntensificationManager;
 import org.sbpo2025.challenge.SimulatedAnnealing.IntensificationStrategy;
 import org.sbpo2025.challenge.SimulatedAnnealing.OperatorSelector;
+import org.sbpo2025.challenge.SimulatedAnnealing.SelectionStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.Ucb1Strategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.EpsilonGreedyStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.RouletteWheelStrategy;
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
 
@@ -97,8 +101,7 @@ public class ChallengeSolver {
 
         // Configura o seletor adaptativo
         adaptiveOperators.setUpdateFrequency(100);
-        adaptiveOperators.setSelectionStrategy(OperatorSelector.SelectionStrategy.UCB1);
-        adaptiveOperators.setUcbExplorationFactor(Math.sqrt(2.0)); // Configura o fator para UCB1
+        adaptiveOperators.setSelectionStrategy(new Ucb1Strategy<>(Math.sqrt(2.0))); // Substituído por instância da estratégia
         adaptiveOperators.setEpsilonExplorationFactor(0.1); // Configura o fator para Epsilon-Greedy (caso a estratégia mude)
 
         // Implementação da interface SolutionEvaluator
