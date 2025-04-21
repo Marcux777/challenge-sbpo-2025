@@ -41,9 +41,10 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
         // Cria o seletor de operadores
         this.selector = new OperatorSelector<>(operators);
 
-        // Configura a estratégia de seleção
+        // Configura a estratégia de seleção e fatores de exploração
         selector.setStrategy(OperatorSelector.SelectionStrategy.UCB1);
-        selector.setExplorationFactor(0.1);
+        selector.setUcbExplorationFactor(Math.sqrt(2.0)); // Valor padrão para UCB1
+        selector.setEpsilonExplorationFactor(0.1); // Valor padrão para Epsilon-Greedy
     }
 
     /**
@@ -145,12 +146,21 @@ public class AdaptiveOperatorSelector implements ASASolver.Neighborhood<Challeng
     }
 
     /**
-     * Define o fator de exploração.
+     * Define o fator de exploração para UCB1.
      *
-     * @param factor Fator de exploração (0.0-1.0)
+     * @param factor Fator de exploração (e.g., sqrt(2.0))
      */
-    public void setExplorationFactor(double factor) {
-        this.selector.setExplorationFactor(factor);
+    public void setUcbExplorationFactor(double factor) {
+        this.selector.setUcbExplorationFactor(factor);
+    }
+
+    /**
+     * Define o fator de exploração (epsilon) para ε-greedy.
+     *
+     * @param factor Fator de exploração (0.0 a 1.0)
+     */
+    public void setEpsilonExplorationFactor(double factor) {
+        this.selector.setEpsilonExplorationFactor(factor);
     }
 
     /**

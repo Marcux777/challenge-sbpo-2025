@@ -5,13 +5,14 @@ import java.util.stream.Collectors;
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
 import org.sbpo2025.challenge.solution.incremental.IncrementalEvaluator;
+import org.sbpo2025.challenge.solution.movements.SolutionMovement;
 
 /**
  * Responsável por aplicar movimentos e perturbações na solução.
  * Implementa os diferentes tipos de movimentos que podem ser aplicados durante a
  * busca por soluções ótimas.
  */
-public class SolutionMover {
+public class SolutionMover implements SolutionMovement {
 
     private final ChallengeSolution solution;
     private final Random random = new Random();

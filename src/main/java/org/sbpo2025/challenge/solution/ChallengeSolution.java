@@ -2,17 +2,61 @@ package org.sbpo2025.challenge.solution;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.incremental.IncrementalEvaluator;
 import org.sbpo2025.challenge.solution.movements.SolutionMover;
 import org.sbpo2025.challenge.solution.validation.SolutionValidator;
+import org.sbpo2025.challenge.solution.evaluation.SolutionEvaluator;
+import org.sbpo2025.challenge.solution.movements.SolutionMovement;
 
 /**
  * Representa uma solução para o problema do SBPO 2025.
  * Esta classe foi modularizada para separar diferentes responsabilidades em classes auxiliares.
  */
-public class ChallengeSolution {
+public class ChallengeSolution implements SolutionOperations {
+    public static class Builder {
+        private final ChallengeInstance instance;
+        private Set<Integer> orders = new HashSet<>();
+        private Set<Integer> aisles = new HashSet<>();
+        private SolutionEvaluator evaluator;
+        private SolutionMovement mover;
+        private SolutionValidator validator;
+
+        public Builder(ChallengeInstance instance) {
+            this.instance = Objects.requireNonNull(instance);
+        }
+
+        public Builder orders(Set<Integer> orders) {
+            this.orders = new HashSet<>(Objects.requireNonNull(orders));
+            return this;
+        }
+
+        public Builder aisles(Set<Integer> aisles) {
+            this.aisles = new HashSet<>(Objects.requireNonNull(aisles));
+            return this;
+        }
+
+        public Builder evaluator(SolutionEvaluator evaluator) {
+            this.evaluator = Objects.requireNonNull(evaluator);
+            return this;
+        }
+
+        public Builder mover(SolutionMovement mover) {
+            this.mover = Objects.requireNonNull(mover);
+            return this;
+        }
+
+        public Builder validator(SolutionValidator validator) {
+            this.validator = Objects.requireNonNull(validator);
+            return this;
+        }
+
+        public ChallengeSolution build() {
+            return new ChallengeSolution(this);
+        }
+    }
 
     // Componentes principais da solução
     private final ChallengeInstance instance;
@@ -21,8 +65,8 @@ public class ChallengeSolution {
     private double currentCost;
 
     // Componentes auxiliares
-    private final IncrementalEvaluator evaluator;
-    private final SolutionMover mover;
+    private final SolutionEvaluator evaluator;
+    private final SolutionMovement mover;
     private final SolutionValidator validator;
 
     // Estruturas de dados auxiliares para avaliação incremental
@@ -33,10 +77,10 @@ public class ChallengeSolution {
     /**
      * Construtor principal da solução
      */
-    public ChallengeSolution(ChallengeInstance instance, Set<Integer> orders, Set<Integer> aisles) {
-        this.instance = instance;
-        this.orders = new HashSet<>(orders);
-        this.aisles = new HashSet<>(aisles);
+    private ChallengeSolution(Builder builder) {
+        this.instance = builder.instance;
+        this.orders = Collections.unmodifiableSet(new HashSet<>(builder.orders));
+        this.aisles = Collections.unmodifiableSet(new HashSet<>(builder.aisles));
         this.currentCost = Double.POSITIVE_INFINITY;
 
         // Inicializa estruturas auxiliares
@@ -45,9 +89,9 @@ public class ChallengeSolution {
         this.coverage = new HashMap<>();
 
         // Inicializa os componentes
-        this.evaluator = new IncrementalEvaluator(this);
-        this.mover = new SolutionMover(this);
-        this.validator = new SolutionValidator(this);
+        this.evaluator = builder.evaluator != null ? builder.evaluator : new IncrementalEvaluator(this);
+        this.mover = builder.mover != null ? builder.mover : new SolutionMover(this);
+        this.validator = builder.validator != null ? builder.validator : new SolutionValidator(this);
 
         // Inicializa mapeamentos
         initializeAuxiliaryDataStructures();
@@ -143,7 +187,14 @@ public class ChallengeSolution {
      * Cria uma cópia profunda desta solução.
      */
     public ChallengeSolution copy() {
-        ChallengeSolution newSolution = new ChallengeSolution(this.instance, this.orders, this.aisles);
+        Builder builder = new Builder(this.instance)
+            .orders(this.orders)
+            .aisles(this.aisles)
+            .evaluator(this.evaluator)
+            .mover(this.mover)
+            .validator(this.validator);
+
+        ChallengeSolution newSolution = builder.build();
         newSolution.currentCost = this.currentCost;
 
         // Copia estruturas de dados auxiliares
@@ -203,8 +254,9 @@ public class ChallengeSolution {
 
     // --- Métodos delegados para IncrementalEvaluator ---
 
-    public void evaluateCost() {
+    public double evaluateCost() {
         this.currentCost = evaluator.evaluateCost();
+        return this.currentCost;
     }
 
     public double cost() {

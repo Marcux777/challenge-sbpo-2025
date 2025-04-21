@@ -49,7 +49,7 @@ public class SwapOrderOperator extends BaseOperator<ChallengeSolution> {
         double initialCost = solution.cost();
 
         // Realiza a troca: primeiro remove, depois adiciona
-        solution.applyRemoveOrder(orderToRemove);
+        solution.applyRemoveOrder(orderToRemove); // Correção: usar o método correto para remover pedido
         solution.applyAddOrder(orderToAdd);
 
         // Repara a solução se necessário

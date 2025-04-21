@@ -3,12 +3,13 @@ package org.sbpo2025.challenge.solution.incremental;
 import java.util.*;
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
+import org.sbpo2025.challenge.solution.evaluation.SolutionEvaluator;
 
 /**
  * Responsável pela avaliação de custo e cálculo incremental de modificações
  * na solução do problema SBPO 2025.
  */
-public class IncrementalEvaluator {
+public class IncrementalEvaluator implements SolutionEvaluator {
 
     private final ChallengeSolution solution;
 

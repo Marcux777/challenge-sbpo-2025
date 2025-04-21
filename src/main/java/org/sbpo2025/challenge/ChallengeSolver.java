@@ -98,7 +98,8 @@ public class ChallengeSolver {
         // Configura o seletor adaptativo
         adaptiveOperators.setUpdateFrequency(100);
         adaptiveOperators.setSelectionStrategy(OperatorSelector.SelectionStrategy.UCB1);
-        adaptiveOperators.setExplorationFactor(0.1);
+        adaptiveOperators.setUcbExplorationFactor(Math.sqrt(2.0)); // Configura o fator para UCB1
+        adaptiveOperators.setEpsilonExplorationFactor(0.1); // Configura o fator para Epsilon-Greedy (caso a estratégia mude)
 
         // Implementação da interface SolutionEvaluator
         ASASolver.SolutionEvaluator<ChallengeSolution> evaluator = new ASASolver.SolutionEvaluator<ChallengeSolution>() {
@@ -347,11 +348,11 @@ public class ChallengeSolver {
             selectedAisles.add(random.nextInt(aisleCount));
         }
 
-        return new ChallengeSolution(
-            new ChallengeInstance("", orders, aisles, nItems, waveSizeLB, waveSizeUB),
-            selectedOrders,
-            selectedAisles
-        );
+        ChallengeInstance instance = new ChallengeInstance("", orders, aisles, nItems, waveSizeLB, waveSizeUB);
+        return new ChallengeSolution.Builder(instance)
+            .orders(selectedOrders)
+            .aisles(selectedAisles)
+            .build();
     }
 
     protected long getRemainingTime(StopWatch stopWatch) {
