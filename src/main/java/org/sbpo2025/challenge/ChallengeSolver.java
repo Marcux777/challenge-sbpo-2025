@@ -12,9 +12,9 @@ import org.sbpo2025.challenge.SimulatedAnnealing.IntensificationManager;
 import org.sbpo2025.challenge.SimulatedAnnealing.IntensificationStrategy;
 import org.sbpo2025.challenge.SimulatedAnnealing.OperatorSelector;
 import org.sbpo2025.challenge.SimulatedAnnealing.SelectionStrategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.Ucb1Strategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.EpsilonGreedyStrategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.RouletteWheelStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.Ucb1Strategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.EpsilonGreedyStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.RouletteWheelStrategy;
 import org.sbpo2025.challenge.model.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
 

@@ -8,9 +8,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.sbpo2025.challenge.SimulatedAnnealing.operators.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
 import org.sbpo2025.challenge.SimulatedAnnealing.SelectionStrategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.Ucb1Strategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.EpsilonGreedyStrategy;
-import org.sbpo2025.challenge.SimulatedAnnealing.RouletteWheelStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.Ucb1Strategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.EpsilonGreedyStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.RouletteWheelStrategy;
 
 /**
  * Implementação da Dinâmica Avançada de Operadores para ASA.

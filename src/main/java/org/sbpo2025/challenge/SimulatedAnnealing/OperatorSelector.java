@@ -9,6 +9,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.Ucb1Strategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.EpsilonGreedyStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.strategies.RouletteWheelStrategy;
 
 /**
  * Implementação do mecanismo de seleção adaptativa de operadores (AOS).

@@ -1,7 +1,10 @@
-package org.sbpo2025.challenge.SimulatedAnnealing;
+package org.sbpo2025.challenge.SimulatedAnnealing.strategies;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import org.sbpo2025.challenge.SimulatedAnnealing.SelectionStrategy;
+import org.sbpo2025.challenge.SimulatedAnnealing.Operator;
+import org.sbpo2025.challenge.SimulatedAnnealing.OperatorSelector;
 
 public class EpsilonGreedyStrategy<S> implements SelectionStrategy<S> {
     private final double epsilon;
