@@ -1,6 +1,9 @@
 package org.sbpo2025.challenge.SimulatedAnnealing;
 
 import org.sbpo2025.challenge.solution.ChallengeSolution;
+import org.sbpo2025.challenge.neighborhood.OrderNeighborhood;
+import org.sbpo2025.challenge.neighborhood.AisleNeighborhood;
+import org.sbpo2025.challenge.neighborhood.Neighborhood;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -67,18 +70,21 @@ public class IntensificationManager implements IntensificationStrategy<Challenge
             FocusedLocalSearch.Mode.BEST_IMPROVEMENT :
             FocusedLocalSearch.Mode.FIRST_IMPROVEMENT;
 
-        // Guarda o custo original para comparação
         double originalCost = solution.cost();
 
-        // Aplica a Busca Local Focada
-        ChallengeSolution improved = FocusedLocalSearch.apply(solution, mode);
+        // Instancia as vizinhanças e o FocusedLocalSearch
+        List<Neighborhood<ChallengeSolution>> neighborhoods = new ArrayList<>();
+        neighborhoods.add(new OrderNeighborhood());
+        neighborhoods.add(new AisleNeighborhood());
+        FocusedLocalSearch fls = new FocusedLocalSearch(neighborhoods);
 
-        // Verifica se houve melhoria
+        // Aplica a Busca Local Focada
+        ChallengeSolution improved = fls.apply(solution, mode);
+
         if (improved.cost() < originalCost) {
             flsImproved++;
             return improved;
         }
-
         return solution;
     }
 
@@ -122,7 +128,11 @@ public class IntensificationManager implements IntensificationStrategy<Challenge
         prApplied++;
 
         double originCost = originSolution.cost();
-        ChallengeSolution result = FocusedLocalSearch.applyPathRelinking(originSolution, guideSolution);
+        // Instancia as vizinhanças para Path Relinking
+        List<Neighborhood<ChallengeSolution>> neighborhoods = new ArrayList<>();
+        neighborhoods.add(new OrderNeighborhood());
+        neighborhoods.add(new AisleNeighborhood());
+        ChallengeSolution result = FocusedLocalSearch.applyPathRelinking(originSolution, guideSolution, neighborhoods);
 
         // Verifica se houve melhoria
         if (result.cost() < originCost) {

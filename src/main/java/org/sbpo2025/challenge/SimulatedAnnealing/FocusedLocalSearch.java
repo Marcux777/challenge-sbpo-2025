@@ -1,7 +1,12 @@
 package org.sbpo2025.challenge.SimulatedAnnealing;
 
 import java.util.*;
+import java.util.stream.*;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
+import org.sbpo2025.challenge.neighborhood.Neighborhood;
+import java.util.Spliterators;
+import java.util.stream.StreamSupport;
+import java.util.stream.Stream;
 
 /**
  * Implementação da técnica de intensificação "Busca Local Focada".
@@ -17,204 +22,126 @@ public class FocusedLocalSearch {
         FIRST_IMPROVEMENT
     }
 
+    private final List<Neighborhood<ChallengeSolution>> neighborhoods;
+    private final Random rand;
+
+    public FocusedLocalSearch(List<Neighborhood<ChallengeSolution>> neighborhoods) {
+        this(neighborhoods, new Random());
+    }
+
+    public FocusedLocalSearch(List<Neighborhood<ChallengeSolution>> neighborhoods, Random rand) {
+        this.neighborhoods = neighborhoods;
+        this.rand = rand;
+    }
+
     /**
-     * Aplica busca local focada a uma solução.
+     * Aplica busca local focada (VND) a uma solução.
      *
      * @param solution A solução a ser otimizada
      * @param mode Modo de busca: BEST_IMPROVEMENT ou FIRST_IMPROVEMENT
      * @return A solução otimizada localmente
      */
-    public static ChallengeSolution apply(ChallengeSolution solution, Mode mode) {
-        if (mode == Mode.BEST_IMPROVEMENT) {
-            return bestImprovement(solution);
-        } else {
-            return firstImprovement(solution);
-        }
+    public ChallengeSolution apply(ChallengeSolution solution, Mode mode) {
+        return apply(solution, mode, FocusedLocalSearchConfig.builder().build());
     }
 
-    /**
-     * Implementa a estratégia Best-Improvement, avaliando toda a vizinhança
-     * e selecionando o melhor vizinho a cada iteração.
-     *
-     * @param solution A solução a ser otimizada
-     * @return A solução otimizada
-     */
-    private static ChallengeSolution bestImprovement(ChallengeSolution solution) {
-        ChallengeSolution currentSolution = solution.copy();
+    public ChallengeSolution apply(ChallengeSolution solution, Mode mode, FocusedLocalSearchConfig config) {
+        ChallengeSolution current = solution.copy();
+        double initialCost = current.cost();
+        double bestCost = initialCost;
+        ChallengeSolution bestSolution = current.copy();
+        int solutionSize = current.getOrders().size() + current.getAisles().size();
+        int patience0 = Math.max(1, config.patienceFactor * solutionSize);
+        int patience = patience0;
+        int noImprove = 0;
+        int iterations = 0;
+        long startTime = System.currentTimeMillis();
         boolean improved;
-
         do {
             improved = false;
-            ChallengeSolution bestNeighbor = null;
-            double bestCost = currentSolution.cost();
-
-            // 1. Explorar vizinhança de adição/remoção de pedidos
-            List<ChallengeSolution> orderNeighbors = generateOrderNeighborhood(currentSolution);
-            for (ChallengeSolution neighbor : orderNeighbors) {
-                double neighborCost = neighbor.cost();
-                if (neighborCost < bestCost && neighbor.isViable()) {
-                    bestCost = neighborCost;
-                    bestNeighbor = neighbor;
+            if (shouldStop(iterations, startTime, config, bestCost, initialCost, noImprove, patience)) break;
+            if (mode == Mode.BEST_IMPROVEMENT) {
+                ChallengeSolution bestNeighbor = null;
+                double neighborBestCost = current.cost();
+                for (Neighborhood<ChallengeSolution> nbh : neighborhoods) {
+                    Optional<ChallengeSolution> best =
+                        StreamSupport.stream(nbh.neighbors(current).spliterator(), true)
+                            .filter(ChallengeSolution::isViable)
+                            .min(Comparator.comparingDouble(ChallengeSolution::cost));
+                    if (best.isPresent() && best.get().cost() < neighborBestCost) {
+                        neighborBestCost = best.get().cost();
+                        bestNeighbor = best.get();
+                    }
+                }
+                if (bestNeighbor != null && bestNeighbor.cost() < current.cost() - config.improvementEpsilon) {
+                    current = bestNeighbor;
                     improved = true;
                 }
-            }
-
-            // 2. Explorar vizinhança de adição/remoção/swap de corredores
-            List<ChallengeSolution> aisleNeighbors = generateAisleNeighborhood(currentSolution);
-            for (ChallengeSolution neighbor : aisleNeighbors) {
-                double neighborCost = neighbor.cost();
-                if (neighborCost < bestCost && neighbor.isViable()) {
-                    bestCost = neighborCost;
-                    bestNeighbor = neighbor;
-                    improved = true;
+            } else { // FIRST_IMPROVEMENT
+                final ChallengeSolution[] currentHolder = new ChallengeSolution[] { current };
+                for (Neighborhood<ChallengeSolution> nbh : neighborhoods) {
+                    boolean localImproved;
+                    do {
+                        localImproved = false;
+                        // Criar uma cópia final da variável rand para usar no lambda
+                        final Random myRand = this.rand;
+                        Stream<ChallengeSolution> stream = StreamSupport.stream(nbh.neighbors(currentHolder[0]).spliterator(), false);
+                        ChallengeSolution found = stream
+                            .collect(Collectors.collectingAndThen(Collectors.toList(), lst -> {
+                                // Usar a cópia final myRand dentro do lambda
+                                Collections.shuffle(lst, myRand);
+                                return lst.stream();
+                            }))
+                            .filter(neighbor -> neighbor.cost() < currentHolder[0].cost() - config.improvementEpsilon && neighbor.isViable())
+                            .findFirst().orElse(null);
+                        if (found != null) {
+                            currentHolder[0] = found;
+                            localImproved = true;
+                            improved = true;
+                        }
+                    } while (localImproved);
                 }
+                current = currentHolder[0];
             }
-
-            // Atualiza a solução com o melhor vizinho encontrado
-            if (improved && bestNeighbor != null) {
-                currentSolution = bestNeighbor;
+            iterations++;
+            if (current.cost() < bestCost - config.improvementEpsilon) {
+                bestCost = current.cost();
+                bestSolution = current.copy();
+                noImprove = 0;
+                double improvementRatio = (initialCost - bestCost) / (initialCost == 0 ? 1 : initialCost);
+                patience = Math.max(1, (int)(patience0 * (1 - improvementRatio)));
+            } else {
+                noImprove++;
             }
-
-        } while (improved);
-
-        return currentSolution;
+            if (config.allowRestart && noImprove >= config.maxNoImprovement) {
+                current = mutateLightly(bestSolution);
+                noImprove = 0;
+            }
+        } while (!shouldStop(iterations, startTime, config, bestCost, initialCost, noImprove, patience));
+        return bestSolution;
     }
 
-    /**
-     * Implementa a estratégia First-Improvement, aceitando o primeiro
-     * vizinho que melhore a solução atual.
-     *
-     * @param solution A solução a ser otimizada
-     * @return A solução otimizada
-     */
-    private static ChallengeSolution firstImprovement(ChallengeSolution solution) {
-        ChallengeSolution currentSolution = solution.copy();
-        boolean improved;
-
-        do {
-            improved = false;
-            double currentCost = currentSolution.cost();
-
-            // Mistura aleatoriamente a ordem dos vizinhos para evitar viés
-            List<ChallengeSolution> allNeighbors = new ArrayList<>();
-            allNeighbors.addAll(generateOrderNeighborhood(currentSolution));
-            allNeighbors.addAll(generateAisleNeighborhood(currentSolution));
-            Collections.shuffle(allNeighbors);
-
-            // Examina vizinhos até encontrar uma melhoria
-            for (ChallengeSolution neighbor : allNeighbors) {
-                double neighborCost = neighbor.cost();
-                if (neighborCost < currentCost && neighbor.isViable()) {
-                    currentSolution = neighbor;
-                    improved = true;
-                    break;
-                }
-            }
-
-        } while (improved);
-
-        return currentSolution;
+    private boolean shouldStop(int iterations, long startTime, FocusedLocalSearchConfig config, double bestCost, double initialCost, int noImprove, int patience) {
+        if (iterations >= config.maxIterations) return true;
+        if (System.currentTimeMillis() - startTime > config.timeoutMillis) return true;
+        if (bestCost <= config.targetCost) return true;
+        if (noImprove >= patience) return true;
+        return false;
     }
 
-    /**
-     * Gera vizinhança baseada em operações de adição/remoção de pedidos.
-     *
-     * @param solution A solução atual
-     * @return Lista de vizinhos com modificações em pedidos
-     */
-    private static List<ChallengeSolution> generateOrderNeighborhood(ChallengeSolution solution) {
-        List<ChallengeSolution> neighbors = new ArrayList<>();
-        Set<Integer> currentOrders = solution.getOrders();
-
-        // Vizinhos por adição de pedidos
-        List<Integer> availableOrders = new ArrayList<>();
-        int maxOrderId = solution.getInstance().getPedidos().size() - 1;
-
-        for (int orderId = 0; orderId <= maxOrderId; orderId++) {
-            if (!currentOrders.contains(orderId)) {
-                availableOrders.add(orderId);
-            }
+    private ChallengeSolution mutateLightly(ChallengeSolution solution) {
+        ChallengeSolution mutated = solution.copy();
+        if (!mutated.getOrders().isEmpty() && rand.nextBoolean()) {
+            List<Integer> orders = new ArrayList<>(mutated.getOrders());
+            int idx = rand.nextInt(orders.size());
+            mutated.applyRemoveOrder(orders.get(idx));
+        } else if (!mutated.getAisles().isEmpty()) {
+            List<Integer> aisles = new ArrayList<>(mutated.getAisles());
+            int idx = rand.nextInt(aisles.size());
+            mutated.applyRemoveAisle(aisles.get(idx));
         }
-
-        for (Integer orderId : availableOrders) {
-            ChallengeSolution neighbor = solution.copy();
-            neighbor.applyAddOrder(orderId);
-
-            // Repara se tornou solução inviável
-            if (!neighbor.isViable()) {
-                neighbor.repair();
-            }
-
-            neighbors.add(neighbor);
-        }
-
-        // Vizinhos por remoção de pedidos
-        for (Integer orderId : currentOrders) {
-            ChallengeSolution neighbor = solution.copy();
-            neighbor.applyRemoveOrder(orderId);
-            neighbors.add(neighbor);
-        }
-
-        return neighbors;
-    }
-
-    /**
-     * Gera vizinhança baseada em operações de adição/remoção/troca de corredores.
-     *
-     * @param solution A solução atual
-     * @return Lista de vizinhos com modificações em corredores
-     */
-    private static List<ChallengeSolution> generateAisleNeighborhood(ChallengeSolution solution) {
-        List<ChallengeSolution> neighbors = new ArrayList<>();
-        Set<Integer> currentAisles = solution.getAisles();
-
-        // Vizinhos por adição de corredores
-        List<Integer> availableAisles = new ArrayList<>();
-        int maxAisleId = solution.getInstance().getCorredores().size() - 1;
-
-        for (int aisleId = 0; aisleId <= maxAisleId; aisleId++) {
-            if (!currentAisles.contains(aisleId)) {
-                availableAisles.add(aisleId);
-            }
-        }
-
-        for (Integer aisleId : availableAisles) {
-            ChallengeSolution neighbor = solution.copy();
-            neighbor.applyAddAisle(aisleId);
-            neighbors.add(neighbor);
-        }
-
-        // Vizinhos por remoção de corredores
-        for (Integer aisleId : currentAisles) {
-            ChallengeSolution neighbor = solution.copy();
-            neighbor.applyRemoveAisle(aisleId);
-
-            // Repara se tornou solução inviável
-            if (!neighbor.isViable()) {
-                neighbor.repair();
-            }
-
-            neighbors.add(neighbor);
-        }
-
-        // Vizinhos por troca de corredores (swap)
-        for (Integer aisleToRemove : currentAisles) {
-            for (Integer aisleToAdd : availableAisles) {
-                ChallengeSolution neighbor = solution.copy();
-
-                neighbor.applyRemoveAisle(aisleToRemove);
-                neighbor.applyAddAisle(aisleToAdd);
-
-                // Repara se tornou solução inviável
-                if (!neighbor.isViable()) {
-                    neighbor.repair();
-                }
-
-                neighbors.add(neighbor);
-            }
-        }
-
-        return neighbors;
+        if (!mutated.isViable()) mutated.repair();
+        return mutated;
     }
 
     /**
@@ -223,9 +150,10 @@ public class FocusedLocalSearch {
      *
      * @param origin Solução de origem
      * @param guide Solução guia
+     * @param neighborhoods Lista de vizinhanças
      * @return A melhor solução encontrada no caminho entre origem e guia
      */
-    public static ChallengeSolution applyPathRelinking(ChallengeSolution origin, ChallengeSolution guide) {
+    public static ChallengeSolution applyPathRelinking(ChallengeSolution origin, ChallengeSolution guide, List<Neighborhood<ChallengeSolution>> neighborhoods) {
         // Se as soluções são iguais, não há caminho a traçar
         if (origin.equals(guide)) {
             return origin.copy();
@@ -314,7 +242,7 @@ public class FocusedLocalSearch {
                 bestCost = currentCost;
 
                 // Opcional: aplica busca local na solução intermediária promissora
-                ChallengeSolution improved = firstImprovement(best);
+                ChallengeSolution improved = new FocusedLocalSearch(neighborhoods).apply(best, Mode.FIRST_IMPROVEMENT);
                 if (improved.cost() < bestCost) {
                     best = improved;
                     bestCost = improved.cost();
