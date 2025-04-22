@@ -1,4 +1,4 @@
-package org.sbpo2025.challenge.neighborhood;
+package org.sbpo2025.challenge.SimulatedAnnealing.neighborhood;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;

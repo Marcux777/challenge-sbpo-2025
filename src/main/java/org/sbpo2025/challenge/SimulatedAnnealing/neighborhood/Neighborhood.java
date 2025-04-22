@@ -1,4 +1,4 @@
-package org.sbpo2025.challenge.neighborhood;
+package org.sbpo2025.challenge.SimulatedAnnealing.neighborhood;
 
 import org.sbpo2025.challenge.solution.ChallengeSolution;
 

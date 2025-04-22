@@ -1,10 +1,13 @@
 package org.sbpo2025.challenge.SimulatedAnnealing;
 
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.apache.commons.lang3.time.StopWatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Implementação genérica do algoritmo Adaptive Simulated Annealing (ASA).
@@ -12,6 +15,8 @@ import org.apache.commons.lang3.time.StopWatch;
  * a diferentes problemas de otimização.
  */
 public class ASASolver<SolutionType> {
+    private static final Logger log = LoggerFactory.getLogger(ASASolver.class);
+
     // Parâmetros do algoritmo ASA
     private int maxNoImprovementIterations;
     private int intensificationFrequency;
@@ -21,7 +26,6 @@ public class ASASolver<SolutionType> {
     private long maxRuntime;
 
     // Estado interno
-    private final Random random;
     private int noImprovementCount;
     private int iteration;
 
@@ -117,7 +121,6 @@ public class ASASolver<SolutionType> {
         this.maxRuntime = maxRuntime;
         this.maxNoImprovementIterations = maxNoImprovementIterations;
 
-        this.random = new Random();
         this.noImprovementCount = 0;
         this.iteration = 0;
 
@@ -162,8 +165,8 @@ public class ASASolver<SolutionType> {
             evaluator.repair(solution);
         }
 
-        double initialCost = evaluator.getCost(solution);
-        double bestCost = initialCost;
+        double currentCost = evaluator.getCost(solution);
+        double bestCost = currentCost;
         SolutionType bestSolution = evaluator.copy(solution);
 
         iteration = 0;
@@ -174,33 +177,38 @@ public class ASASolver<SolutionType> {
             iteration++;
 
             // Aplica um movimento aleatório na vizinhança
-            boolean moveAccepted = neighborhood.applyRandomMove(solution, random);
+            boolean moveAccepted = neighborhood.applyRandomMove(solution, ThreadLocalRandom.current());
+            if (moveAccepted) {
+                currentCost = evaluator.getCost(solution);
+            }
             boolean intensificationImproved = false;
 
             // Atualiza o arquivo de elite periodicamente
             if (iteration % eliteUpdateFrequency == 0) {
                 intensifier.updateEliteArchive(solution);
                 intensifier.updateEliteArchive(bestSolution);
-
-                System.out.printf("Iteração %d: Arquivo elite atualizado (%d soluções)%n",
-                        iteration, intensifier.getEliteCount());
+                if (log.isDebugEnabled()) {
+                    log.debug("Iter {}: elite atualizado ({} soluções)", iteration, intensifier.getEliteCount());
+                }
             }
 
             // Aplica busca local focada periodicamente ou quando a busca estagna
             if (iteration % intensificationFrequency == 0 || noImprovementCount > maxNoImprovementIterations / 2) {
                 boolean useBestImprovement = noImprovementCount > maxNoImprovementIterations / 2;
 
-                System.out.printf("Iteração %d: Aplicando Busca Local Focada (modo=%s)%n",
-                        iteration, useBestImprovement ? "BEST_IMPROVEMENT" : "FIRST_IMPROVEMENT");
+                double beforeCost = currentCost;
+                SolutionType backup = evaluator.copy(solution); // backup só se necessário
+                intensifier.applyFocusedLocalSearch(solution, useBestImprovement); // in-place
+                double afterCost = evaluator.getCost(solution);
+                currentCost = afterCost;
 
-                SolutionType before = evaluator.copy(solution);
-                solution = intensifier.applyFocusedLocalSearch(solution, useBestImprovement);
-
-                if (evaluator.getCost(solution) > evaluator.getCost(before)) {
-                    solution = before;
-                } else if (evaluator.getCost(solution) < evaluator.getCost(before)) {
-                    System.out.printf("Iteração %d: Busca Local Focada melhorou solução: %.4f -> %.4f%n",
-                            iteration, evaluator.getCost(before), evaluator.getCost(solution));
+                if (afterCost > beforeCost) {
+                    evaluator.copyFrom(solution, backup);
+                    currentCost = beforeCost;
+                } else if (afterCost < beforeCost) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Iter {}: Busca Local Focada melhorou solução: {} -> {}", iteration, beforeCost, afterCost);
+                    }
                     intensificationImproved = true;
                     noImprovementCount = 0;
                 }
@@ -209,46 +217,58 @@ public class ASASolver<SolutionType> {
             // Aplica path relinking periodicamente ou quando a busca estagna
             if ((iteration % pathRelinkingFrequency == 0 || noImprovementCount > maxNoImprovementIterations * 0.7)
                     && intensifier.getEliteCount() >= 2) {
-                System.out.printf("Iteração %d: Aplicando Path Relinking entre soluções elite%n", iteration);
+                if (log.isDebugEnabled()) {
+                    log.debug("Iter {}: Path Relinking entre soluções elite", iteration);
+                }
 
                 SolutionType prSolution = intensifier.applyElitePathRelinking();
 
-                if (prSolution != null && evaluator.getCost(prSolution) < evaluator.getCost(solution)) {
-                    double oldCost = evaluator.getCost(solution);
-                    solution = evaluator.copy(prSolution);
-                    System.out.printf("Iteração %d: Path Relinking melhorou a solução: %.4f -> %.4f%n",
-                            iteration, oldCost, evaluator.getCost(solution));
-
-                    intensificationImproved = true;
-                    noImprovementCount = 0;
+                if (prSolution != null) {
+                    double prCost = evaluator.getCost(prSolution);
+                    if (prCost < currentCost) {
+                        double oldCost = currentCost;
+                        evaluator.copyFrom(solution, prSolution);
+                        currentCost = prCost;
+                        if (log.isDebugEnabled()) {
+                            log.debug("Iter {}: Path Relinking melhorou a solução: {} -> {}", iteration, oldCost, currentCost);
+                        }
+                        intensificationImproved = true;
+                        noImprovementCount = 0;
+                    }
                 }
             }
 
             // Aplica intensificação memética quando a estagnação é alta
             if (noImprovementCount > maxNoImprovementIterations * 0.8 && intensifier.hasEliteSolutions()) {
-                System.out.printf("Iteração %d: Aplicando Intensificação Memética (estagnação alta: %d)%n",
-                        iteration, noImprovementCount);
+                if (log.isDebugEnabled()) {
+                    log.debug("Iter {}: Intensificação Memética (estagnação alta: {})", iteration, noImprovementCount);
+                }
 
                 SolutionType memeticSolution = intensifier.applyMemeticIntensification();
 
-                if (memeticSolution != null && evaluator.getCost(memeticSolution) < evaluator.getCost(solution)) {
-                    double oldCost = evaluator.getCost(solution);
-                    solution = evaluator.copy(memeticSolution);
-                    System.out.printf("Iteração %d: Intensificação Memética melhorou a solução: %.4f -> %.4f%n",
-                            iteration, oldCost, evaluator.getCost(solution));
-
-                    intensificationImproved = true;
-                    noImprovementCount = 0;
+                if (memeticSolution != null) {
+                    double memeticCost = evaluator.getCost(memeticSolution);
+                    if (memeticCost < currentCost) {
+                        double oldCost = currentCost;
+                        evaluator.copyFrom(solution, memeticSolution);
+                        currentCost = memeticCost;
+                        if (log.isDebugEnabled()) {
+                            log.debug("Iter {}: Intensificação Memética melhorou a solução: {} -> {}", iteration, oldCost, currentCost);
+                        }
+                        intensificationImproved = true;
+                        noImprovementCount = 0;
+                    }
                 }
             }
 
             // Verifica se encontrou uma nova melhor solução
-            if (evaluator.getCost(solution) < bestCost && evaluator.isViable(solution)) {
-                bestCost = evaluator.getCost(solution);
+            if (currentCost < bestCost && evaluator.isViable(solution)) {
+                bestCost = currentCost;
                 evaluator.copyFrom(bestSolution, solution);
                 noImprovementCount = 0;
-
-                System.out.printf("Nova melhor solução: %.2f%n", bestCost);
+                if (log.isDebugEnabled()) {
+                    log.debug("Iter {}: Nova melhor solução: {}", iteration, bestCost);
+                }
             } else if (!moveAccepted && !intensificationImproved) {
                 noImprovementCount++;
 
@@ -259,6 +279,7 @@ public class ASASolver<SolutionType> {
                     if (!evaluator.isViable(solution)) {
                         evaluator.repair(solution);
                     }
+                    currentCost = evaluator.getCost(solution);
                 }
             }
         }

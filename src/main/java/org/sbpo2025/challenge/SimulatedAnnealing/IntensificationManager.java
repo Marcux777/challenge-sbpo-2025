@@ -1,9 +1,13 @@
 package org.sbpo2025.challenge.SimulatedAnnealing;
 
+import org.sbpo2025.challenge.SimulatedAnnealing.focusedlocalsearch.FocusedLocalSearch;
+import org.sbpo2025.challenge.SimulatedAnnealing.focusedlocalsearch.FocusedLocalSearchConfig;
+import org.sbpo2025.challenge.SimulatedAnnealing.focusedlocalsearch.PathRelinker;
+import org.sbpo2025.challenge.SimulatedAnnealing.neighborhood.AisleNeighborhood;
+import org.sbpo2025.challenge.SimulatedAnnealing.neighborhood.Neighborhood;
+import org.sbpo2025.challenge.SimulatedAnnealing.neighborhood.OrderNeighborhood;
 import org.sbpo2025.challenge.solution.ChallengeSolution;
-import org.sbpo2025.challenge.neighborhood.OrderNeighborhood;
-import org.sbpo2025.challenge.neighborhood.AisleNeighborhood;
-import org.sbpo2025.challenge.neighborhood.Neighborhood;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -132,7 +136,8 @@ public class IntensificationManager implements IntensificationStrategy<Challenge
         List<Neighborhood<ChallengeSolution>> neighborhoods = new ArrayList<>();
         neighborhoods.add(new OrderNeighborhood());
         neighborhoods.add(new AisleNeighborhood());
-        ChallengeSolution result = FocusedLocalSearch.applyPathRelinking(originSolution, guideSolution, neighborhoods);
+        PathRelinker relinker = new PathRelinker(neighborhoods);
+        ChallengeSolution result = relinker.relink(originSolution, guideSolution);
 
         // Verifica se houve melhoria
         if (result.cost() < originCost) {

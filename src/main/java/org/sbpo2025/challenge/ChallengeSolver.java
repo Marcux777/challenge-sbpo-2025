@@ -1,6 +1,7 @@
 package org.sbpo2025.challenge;
 
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -39,6 +40,12 @@ public class ChallengeSolver {
     protected int[] totalUnitsPicked;    // Unidades selecionadas por item
     protected int[] totalUnitsAvailable; // Unidades disponíveis por item
 
+    // Novas estruturas para acesso eficiente a pedidos/corredores disponíveis
+    private final Set<Integer> ordersAvailable = new HashSet<>();
+    private final List<Integer> ordersAvailableList = new ArrayList<>();
+    private final Set<Integer> aislesAvailable = new HashSet<>();
+    private final List<Integer> aislesAvailableList = new ArrayList<>();
+
     public ChallengeSolver(
             List<Map<Integer, Integer>> orders, List<Map<Integer, Integer>> aisles, int nItems, int waveSizeLB, int waveSizeUB) {
         this.orders = orders;
@@ -49,6 +56,15 @@ public class ChallengeSolver {
 
         // Inicializa estruturas de dados auxiliares
         initializeAuxiliaryStructures();
+        // Inicializa listas de disponíveis
+        for (int i = 0; i < orders.size(); i++) {
+            ordersAvailable.add(i);
+            ordersAvailableList.add(i);
+        }
+        for (int i = 0; i < aisles.size(); i++) {
+            aislesAvailable.add(i);
+            aislesAvailableList.add(i);
+        }
     }
 
     /**
@@ -64,21 +80,23 @@ public class ChallengeSolver {
         for (int i = 0; i < orders.size(); i++) {
             aislesByOrder.put(i, new HashSet<>());
         }
-
-        // Inicializa mapeamento de corredores para pedidos
         for (int j = 0; j < aisles.size(); j++) {
             ordersByAisle.put(j, new HashSet<>());
+        }
 
-            // Para cada item deste corredor
-            for (Map.Entry<Integer, Integer> itemEntry : aisles.get(j).entrySet()) {
-                int itemId = itemEntry.getKey();
-
-                // Verifica quais pedidos necessitam deste item
-                for (int i = 0; i < orders.size(); i++) {
-                    if (orders.get(i).containsKey(itemId)) {
-                        aislesByOrder.get(i).add(j);
-                        ordersByAisle.get(j).add(i);
-                    }
+        // Otimização: mapeia item -> pedidos que pedem esse item
+        Map<Integer, List<Integer>> ordersByItem = new HashMap<>();
+        for (int i = 0; i < orders.size(); i++) {
+            for (Integer item : orders.get(i).keySet()) {
+                ordersByItem.computeIfAbsent(item, k -> new ArrayList<>()).add(i);
+            }
+        }
+        List<Integer> emptyList = Collections.emptyList();
+        for (int j = 0; j < aisles.size(); j++) {
+            for (Integer item : aisles.get(j).keySet()) {
+                for (Integer order : ordersByItem.getOrDefault(item, emptyList)) {
+                    aislesByOrder.get(order).add(j);
+                    ordersByAisle.get(j).add(order);
                 }
             }
         }
@@ -103,6 +121,10 @@ public class ChallengeSolver {
         adaptiveOperators.setUpdateFrequency(100);
         adaptiveOperators.setSelectionStrategy(new Ucb1Strategy<>(Math.sqrt(2.0))); // Substituído por instância da estratégia
         adaptiveOperators.setEpsilonExplorationFactor(0.1); // Configura o fator para Epsilon-Greedy (caso a estratégia mude)
+
+        // Random global e buffer reutilizável
+        Random rng = ThreadLocalRandom.current();
+        List<Integer> buffer = new ArrayList<>();
 
         // Implementação da interface SolutionEvaluator
         ASASolver.SolutionEvaluator<ChallengeSolution> evaluator = new ASASolver.SolutionEvaluator<ChallengeSolution>() {
@@ -171,107 +193,97 @@ public class ChallengeSolver {
         return bestSolution;
     }
 
-    private boolean tryAddOrder(ChallengeSolution solution, Random random) {
-        Set<Integer> currentOrders = solution.getOrders();
-        List<Integer> availableOrders = new ArrayList<>();
-
-        for (int i = 0; i < orders.size(); i++) {
-            if (!currentOrders.contains(i)) {
-                availableOrders.add(i);
-            }
-        }
-
-        if (availableOrders.isEmpty()) {
+    private boolean tryAddOrder(ChallengeSolution solution, Random random, List<Integer> buffer, double currentCost) {
+        if (ordersAvailable.isEmpty()) {
             return false;
         }
-
-        int orderToAdd = availableOrders.get(random.nextInt(availableOrders.size()));
+        int idx = random.nextInt(ordersAvailableList.size());
+        int orderToAdd = ordersAvailableList.get(idx);
 
         long t0 = System.nanoTime();
         double delta = solution.calculateAddOrderDelta(orderToAdd);
         registerIncrementalEvaluation(System.nanoTime() - t0);
 
-        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (solution.cost() * 0.1)))) {
+        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (currentCost * 0.1)))) {
             solution.applyAddOrder(orderToAdd);
-
-            if (!solution.isViable()) {
-                solution.repair();
-                return true;
-            }
+            // Atualiza estruturas de disponíveis
+            ordersAvailable.remove(orderToAdd);
+            ordersAvailableList.remove((Integer) orderToAdd);
             return true;
         }
 
         return false;
     }
 
-    private boolean tryRemoveOrder(ChallengeSolution solution, Random random) {
+    private boolean tryRemoveOrder(ChallengeSolution solution, Random random, List<Integer> buffer, double currentCost) {
         Set<Integer> currentOrders = solution.getOrders();
         if (currentOrders.isEmpty()) {
             return false;
         }
 
-        List<Integer> ordersList = new ArrayList<>(currentOrders);
-        int orderToRemove = ordersList.get(random.nextInt(ordersList.size()));
+        buffer.clear();
+        buffer.addAll(currentOrders);
+        int orderToRemove = buffer.get(random.nextInt(buffer.size()));
 
         long t0 = System.nanoTime();
         double delta = solution.calculateRemoveOrderDelta(orderToRemove);
         registerIncrementalEvaluation(System.nanoTime() - t0);
 
-        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (solution.cost() * 0.1)))) {
+        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (currentCost * 0.1)))) {
             solution.applyRemoveOrder(orderToRemove);
+            // Atualiza estruturas de disponíveis
+            if (!ordersAvailable.contains(orderToRemove)) {
+                ordersAvailable.add(orderToRemove);
+                ordersAvailableList.add(orderToRemove);
+            }
             return true;
         }
 
         return false;
     }
 
-    private boolean tryAddAisle(ChallengeSolution solution, Random random) {
-        Set<Integer> currentAisles = solution.getAisles();
-        List<Integer> availableAisles = new ArrayList<>();
-
-        for (int i = 0; i < aisles.size(); i++) {
-            if (!currentAisles.contains(i)) {
-                availableAisles.add(i);
-            }
-        }
-
-        if (availableAisles.isEmpty()) {
+    private boolean tryAddAisle(ChallengeSolution solution, Random random, List<Integer> buffer, double currentCost) {
+        if (aislesAvailable.isEmpty()) {
             return false;
         }
-
-        int aisleToAdd = availableAisles.get(random.nextInt(availableAisles.size()));
+        int idx = random.nextInt(aislesAvailableList.size());
+        int aisleToAdd = aislesAvailableList.get(idx);
 
         long t0 = System.nanoTime();
         double delta = solution.calculateAddAisleDelta(aisleToAdd);
         registerIncrementalEvaluation(System.nanoTime() - t0);
 
-        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (solution.cost() * 0.1)))) {
+        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (currentCost * 0.1)))) {
             solution.applyAddAisle(aisleToAdd);
+            // Atualiza estruturas de disponíveis
+            aislesAvailable.remove(aisleToAdd);
+            aislesAvailableList.remove((Integer) aisleToAdd);
             return true;
         }
 
         return false;
     }
 
-    private boolean tryRemoveAisle(ChallengeSolution solution, Random random) {
+    private boolean tryRemoveAisle(ChallengeSolution solution, Random random, List<Integer> buffer, double currentCost) {
         Set<Integer> currentAisles = solution.getAisles();
         if (currentAisles.isEmpty()) {
             return false;
         }
 
-        List<Integer> aislesList = new ArrayList<>(currentAisles);
-        int aisleToRemove = aislesList.get(random.nextInt(aislesList.size()));
+        buffer.clear();
+        buffer.addAll(currentAisles);
+        int aisleToRemove = buffer.get(random.nextInt(buffer.size()));
 
         long t0 = System.nanoTime();
         double delta = solution.calculateRemoveAisleDelta(aisleToRemove);
         registerIncrementalEvaluation(System.nanoTime() - t0);
 
-        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (solution.cost() * 0.1)))) {
+        if (delta < 0 || (delta > 0 && random.nextDouble() < Math.exp(-delta / (currentCost * 0.1)))) {
             solution.applyRemoveAisle(aisleToRemove);
-
-            if (!solution.isViable()) {
-                solution.repair();
-                return true;
+            // Atualiza estruturas de disponíveis
+            if (!aislesAvailable.contains(aisleToRemove)) {
+                aislesAvailable.add(aisleToRemove);
+                aislesAvailableList.add(aisleToRemove);
             }
             return true;
         }
@@ -279,38 +291,30 @@ public class ChallengeSolver {
         return false;
     }
 
-    private boolean trySwapAisle(ChallengeSolution solution, Random random) {
+    private boolean trySwapAisle(ChallengeSolution solution, Random random, List<Integer> buffer, double currentCost) {
         Set<Integer> currentAisles = solution.getAisles();
-        if (currentAisles.isEmpty()) {
+        if (currentAisles.isEmpty() || aislesAvailable.isEmpty()) {
             return false;
         }
 
-        List<Integer> availableAisles = new ArrayList<>();
-        for (int i = 0; i < aisles.size(); i++) {
-            if (!currentAisles.contains(i)) {
-                availableAisles.add(i);
-            }
-        }
-
-        if (availableAisles.isEmpty()) {
-            return false;
-        }
-
-        List<Integer> aislesList = new ArrayList<>(currentAisles);
-        int aisleToRemove = aislesList.get(random.nextInt(aislesList.size()));
-        int aisleToAdd = availableAisles.get(random.nextInt(availableAisles.size()));
+        buffer.clear();
+        buffer.addAll(currentAisles);
+        int aisleToRemove = buffer.get(random.nextInt(buffer.size()));
+        int aisleToAdd = aislesAvailableList.get(random.nextInt(aislesAvailableList.size()));
 
         long t0 = System.nanoTime();
         double totalDelta = solution.calculateSwapAisleDelta(aisleToRemove, aisleToAdd);
         registerIncrementalEvaluation(System.nanoTime() - t0);
 
-        if (totalDelta < 0 || (totalDelta > 0 && random.nextDouble() < Math.exp(-totalDelta / (solution.cost() * 0.1)))) {
+        if (totalDelta < 0 || (totalDelta > 0 && random.nextDouble() < Math.exp(-totalDelta / (currentCost * 0.1)))) {
             solution.applyRemoveAisle(aisleToRemove);
             solution.applyAddAisle(aisleToAdd);
-
-            if (!solution.isViable()) {
-                solution.repair();
-                return true;
+            // Atualiza estruturas de disponíveis
+            aislesAvailable.remove(aisleToAdd);
+            aislesAvailableList.remove((Integer) aisleToAdd);
+            if (!aislesAvailable.contains(aisleToRemove)) {
+                aislesAvailable.add(aisleToRemove);
+                aislesAvailableList.add(aisleToRemove);
             }
             return true;
         }
